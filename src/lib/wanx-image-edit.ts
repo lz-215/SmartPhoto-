@@ -21,6 +21,7 @@ export interface WanxImageEditRequest {
   n?: number; // 生成图片数量，默认1
   prompt: string;
   strength?: number; // 编辑强度 0.1-1.0
+  upscale_factor?: number; // 图像超分的放大倍数 1-4
 }
 
 // 图像编辑响应
@@ -87,6 +88,9 @@ class WanxImageEditService {
         parameters: {
           n: request.n || 1,
           ...(request.strength && { strength: request.strength }),
+          ...(request.upscale_factor && {
+            upscale_factor: request.upscale_factor,
+          }),
         },
       }),
       headers: {

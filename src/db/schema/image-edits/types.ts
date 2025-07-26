@@ -19,8 +19,9 @@ export interface ImageEditRequest {
   editFunction: ImageEditFunction;
   imageCount?: number;
   maskImageUrl?: string;
-  originalImageId: string;
+  originalImageUrl: string;
   prompt: string;
+  scaleFactor?: number; // 图像超分的放大倍数
   strength?: number;
 }
 

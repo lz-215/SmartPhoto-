@@ -23,11 +23,11 @@ const createTaskSchema = z.object({
   ]),
   imageCount: z.number().min(1).max(4).optional(),
   maskImageUrl: z.string().url().optional(),
-  originalImageId: z.string().min(1, "original image id is required"),
+  originalImageUrl: z.string().url("图片URL格式不正确"),
   prompt: z.string().min(1, "prompt is required").max(800, "prompt too long"),
+  scaleFactor: z.number().min(2).max(8).optional(),
   strength: z.number().min(0.1).max(1.0).optional(),
 });
-
 
 // 获取用户的图像编辑任务列表
 export async function GET(request: NextRequest) {
@@ -42,11 +42,11 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const limit = Math.min(
       Number.parseInt(searchParams.get("limit") || "20"),
-      50
+      50,
     );
     const offset = Math.max(
       Number.parseInt(searchParams.get("offset") || "0"),
-      0
+      0,
     );
 
     // 获取任务列表
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 解析请求体
-    const body = await request.json() as unknown;
+    const body = (await request.json()) as unknown;
     const validatedData = createTaskSchema.parse(body);
 
     // 创建编辑任务
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
       {
         error: error instanceof Error ? error.message : "internal server error",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

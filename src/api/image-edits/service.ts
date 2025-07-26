@@ -9,43 +9,34 @@ import {
   type ImageEditTask,
   imageEditTasksTable,
   type TaskStatus,
-  uploadsTable
+  uploadsTable,
 } from "~/db/schema";
 import { uploadToS3 } from "~/lib/s3";
-import { type WanxImageEditFunction, wanxImageEditService } from "~/lib/wanx-image-edit";
+import {
+  type WanxImageEditFunction,
+  wanxImageEditService,
+} from "~/lib/wanx-image-edit";
 
 /**
  * 创建图像编辑任务
  */
 export async function createImageEditTask(
   userId: string,
-  request: ImageEditRequest
+  request: ImageEditRequest,
 ): Promise<ImageEditResponse> {
   try {
-    // 验证原始图片是否存在且属于用户
-    const originalImage = await db.query.uploadsTable.findFirst({
-      where: and(
-        eq(uploadsTable.id, request.originalImageId),
-        eq(uploadsTable.userId, userId)
-      ),
-    });
-
-    if (!originalImage) {
-      throw new Error("original image not found or access denied");
-    }
-
-    if (originalImage.type !== "image") {
-      throw new Error("only image files can be edited");
-    }
+    // 直接使用传入的图片URL，不再需要验证数据库中的图片
+    const originalImageUrl = request.originalImageUrl;
 
     // 调用通义万象API创建编辑任务
     const wanxResponse = await wanxImageEditService.createEditTask({
-      base_image_url: originalImage.url,
+      base_image_url: originalImageUrl,
       function: request.editFunction as WanxImageEditFunction,
       mask_image_url: request.maskImageUrl,
       n: request.imageCount || 1,
       prompt: request.prompt,
       strength: request.strength,
+      upscale_factor: request.scaleFactor,
     });
 
     // 保存任务到数据库
@@ -55,8 +46,9 @@ export async function createImageEditTask(
       id: taskId,
       imageCount: request.imageCount || 1,
       maskImageUrl: request.maskImageUrl,
-      originalImageId: request.originalImageId,
+      originalImageUrl: request.originalImageUrl,
       prompt: request.prompt,
+      scaleFactor: request.scaleFactor,
       status: "pending",
       strength: request.strength,
       userId,
@@ -69,7 +61,9 @@ export async function createImageEditTask(
     };
   } catch (error) {
     console.error("create image edit task error:", error);
-    throw new Error(`failed to create image edit task: ${error instanceof Error ? error.message : "unknown error"}`);
+    throw new Error(
+      `failed to create image edit task: ${error instanceof Error ? error.message : "unknown error"}`,
+    );
   }
 }
 
@@ -78,14 +72,14 @@ export async function createImageEditTask(
  */
 export async function deleteImageEditTask(
   userId: string,
-  taskId: string
+  taskId: string,
 ): Promise<void> {
   try {
     // 验证任务所有权
     const task = await db.query.imageEditTasksTable.findFirst({
       where: and(
         eq(imageEditTasksTable.id, taskId),
-        eq(imageEditTasksTable.userId, userId)
+        eq(imageEditTasksTable.userId, userId),
       ),
     });
 
@@ -94,11 +88,14 @@ export async function deleteImageEditTask(
     }
 
     // 删除任务（级联删除结果）
-    await db.delete(imageEditTasksTable)
+    await db
+      .delete(imageEditTasksTable)
       .where(eq(imageEditTasksTable.id, taskId));
   } catch (error) {
     console.error("delete image edit task error:", error);
-    throw new Error(`failed to delete task: ${error instanceof Error ? error.message : "unknown error"}`);
+    throw new Error(
+      `failed to delete task: ${error instanceof Error ? error.message : "unknown error"}`,
+    );
   }
 }
 
@@ -107,14 +104,14 @@ export async function deleteImageEditTask(
  */
 export async function getImageEditTaskStatus(
   userId: string,
-  taskId: string
+  taskId: string,
 ): Promise<ImageEditResponse> {
   try {
     // 查询任务信息
     const task = await db.query.imageEditTasksTable.findFirst({
       where: and(
         eq(imageEditTasksTable.id, taskId),
-        eq(imageEditTasksTable.userId, userId)
+        eq(imageEditTasksTable.userId, userId),
       ),
       with: {
         results: true,
@@ -129,8 +126,12 @@ export async function getImageEditTaskStatus(
     if (task.status === "succeeded" || task.status === "failed") {
       return {
         errorMessage: task.errorMessage || undefined,
-        results: task.results.map(result => ({
+        results: task.results.map((result) => ({
           id: result.id,
+          // LivePortrait检测结果
+          livePortraitCompatible: result.livePortraitCompatible,
+          livePortraitDetectedAt: result.livePortraitDetectedAt,
+          livePortraitMessage: result.livePortraitMessage,
           resultImageUrl: result.resultImageUrl,
           savedImageId: result.savedImageId || undefined,
         })),
@@ -144,7 +145,8 @@ export async function getImageEditTaskStatus(
     const newStatus = mapWanxStatusToTaskStatus(wanxResult.output.task_status);
 
     // 更新任务状态
-    await db.update(imageEditTasksTable)
+    await db
+      .update(imageEditTasksTable)
       .set({
         status: newStatus,
         updatedAt: new Date(),
@@ -169,6 +171,10 @@ export async function getImageEditTaskStatus(
 
         results.push({
           id: resultId,
+          // LivePortrait检测结果将通过异步调用更新
+          livePortraitCompatible: null,
+          livePortraitDetectedAt: null,
+          livePortraitMessage: null,
           resultImageUrl: result.url,
         });
       }
@@ -181,13 +187,44 @@ export async function getImageEditTaskStatus(
     }
 
     return {
-      errorMessage: newStatus === "failed" ? wanxResult.output.message : undefined,
+      errorMessage:
+        newStatus === "failed" ? wanxResult.output.message : undefined,
       status: newStatus,
       taskId,
     };
   } catch (error) {
     console.error("get image edit task status error:", error);
-    throw new Error(`failed to get task status: ${error instanceof Error ? error.message : "unknown error"}`);
+    throw new Error(
+      `failed to get task status: ${error instanceof Error ? error.message : "unknown error"}`,
+    );
+  }
+}
+
+/**
+ * 根据结果ID获取任务信息（用于重试）
+ */
+export async function getTaskByResultId(
+  userId: string,
+  resultId: string,
+): Promise<ImageEditTask | null> {
+  try {
+    const result = await db.query.imageEditResultsTable.findFirst({
+      where: eq(imageEditResultsTable.id, resultId),
+      with: {
+        task: true,
+      },
+    });
+
+    if (!result || result.task.userId !== userId) {
+      return null;
+    }
+
+    return result.task;
+  } catch (error) {
+    console.error("get task by result id error:", error);
+    throw new Error(
+      `failed to get task by result id: ${error instanceof Error ? error.message : "unknown error"}`,
+    );
   }
 }
 
@@ -197,7 +234,7 @@ export async function getImageEditTaskStatus(
 export async function getUserImageEditTasks(
   userId: string,
   limit = 20,
-  offset = 0
+  offset = 0,
 ): Promise<ImageEditTask[]> {
   try {
     return await db.query.imageEditTasksTable.findMany({
@@ -206,13 +243,14 @@ export async function getUserImageEditTasks(
       orderBy: [desc(imageEditTasksTable.createdAt)],
       where: eq(imageEditTasksTable.userId, userId),
       with: {
-        originalImage: true,
         results: true,
       },
     });
   } catch (error) {
     console.error("get user image edit tasks error:", error);
-    throw new Error(`failed to get tasks: ${error instanceof Error ? error.message : "unknown error"}`);
+    throw new Error(
+      `failed to get tasks: ${error instanceof Error ? error.message : "unknown error"}`,
+    );
   }
 }
 
@@ -221,7 +259,7 @@ export async function getUserImageEditTasks(
  */
 export async function saveEditResultToLocal(
   userId: string,
-  resultId: string
+  resultId: string,
 ): Promise<{ savedImageId: string; url: string }> {
   try {
     // 查询编辑结果
@@ -275,7 +313,8 @@ export async function saveEditResultToLocal(
     });
 
     // 更新编辑结果记录
-    await db.update(imageEditResultsTable)
+    await db
+      .update(imageEditResultsTable)
       .set({ savedImageId })
       .where(eq(imageEditResultsTable.id, resultId));
 
@@ -285,7 +324,9 @@ export async function saveEditResultToLocal(
     };
   } catch (error) {
     console.error("save edit result to local error:", error);
-    throw new Error(`failed to save result: ${error instanceof Error ? error.message : "unknown error"}`);
+    throw new Error(
+      `failed to save result: ${error instanceof Error ? error.message : "unknown error"}`,
+    );
   }
 }
 

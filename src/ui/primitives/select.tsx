@@ -1,8 +1,9 @@
 "use client";
 
+import type * as React from "react";
+
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
-import type * as React from "react";
 
 import { cn } from "~/lib/cn";
 
@@ -25,21 +26,21 @@ const SelectTrigger = ({
   <SelectPrimitive.Trigger
     className={cn(
       `
-        flex h-10 w-full items-center justify-between rounded-md border
+        flex h-10 w-full items-start justify-between rounded-md border
         border-input bg-background px-3 py-2 text-sm ring-offset-background
         placeholder:text-muted-foreground
         focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-none
         disabled:cursor-not-allowed disabled:opacity-50
         [&>span]:line-clamp-1
       `,
-      className
+      className,
     )}
     ref={ref}
     {...props}
   >
     {children}
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-4 w-4 opacity-50" />
+      <ChevronDown className="h-4 w-4 items-start opacity-50" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 );
@@ -57,7 +58,7 @@ const SelectScrollUpButton = ({
   <SelectPrimitive.ScrollUpButton
     className={cn(
       "flex cursor-default items-center justify-center py-1",
-      className
+      className,
     )}
     ref={ref}
     {...props}
@@ -79,7 +80,7 @@ const SelectScrollDownButton = ({
   <SelectPrimitive.ScrollDownButton
     className={cn(
       "flex cursor-default items-center justify-center py-1",
-      className
+      className,
     )}
     ref={ref}
     {...props}
@@ -123,7 +124,7 @@ const SelectContent = ({
             data-[side=right]:translate-x-1
             data-[side=top]:-translate-y-1
           `,
-        className
+        className,
       )}
       position={position}
       ref={ref}
@@ -137,7 +138,7 @@ const SelectContent = ({
             `
               h-[var(--radix-select-trigger-height)] w-full
               min-w-[var(--radix-select-trigger-width)]
-            `
+            `,
         )}
       >
         {children}
@@ -179,7 +180,7 @@ const SelectItem = ({
         focus:bg-accent focus:text-accent-foreground
         data-[disabled]:pointer-events-none data-[disabled]:opacity-50
       `,
-      className
+      className,
     )}
     ref={ref}
     {...props}
